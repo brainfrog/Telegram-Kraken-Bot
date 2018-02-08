@@ -1,7 +1,7 @@
 #!/usr/bin/python3
 
 import json
-import logging
+import file_logger
 import os
 import sys
 import time
@@ -40,41 +40,7 @@ else:
     exit("No configuration file 'config.json' found")
 
 # Set up logging
-
-# Formatter string for logging
-formatter_str = "%(asctime)s - %(levelname)s - %(name)s - %(message)s"
-date_format = "%y%m%d"
-
-# Folder name for logfiles
-log_dir = "log"
-
-# Do not use the logger directly. Use function 'log(msg, severity)'
-logging.basicConfig(level=config["log_level"], format=formatter_str)
-logger = logging.getLogger()
-
-# Current date for logging
-date = datetime.datetime.now().strftime(date_format)
-
-# Add a file handlers to the logger if enabled
-if config["log_to_file"]:
-    # If log directory doesn't exist, create it
-    if not os.path.exists(log_dir):
-        os.makedirs(log_dir)
-
-    # Create a file handler for logging
-    logfile_path = os.path.join(log_dir, date + ".log")
-    handler = logging.FileHandler(logfile_path, encoding="utf-8")
-    handler.setLevel(config["log_level"])
-
-    # Format file handler
-    formatter = logging.Formatter(formatter_str)
-    handler.setFormatter(formatter)
-
-    # Add file handler to logger
-    logger.addHandler(handler)
-
-    # Redirect all uncaught exceptions to logfile
-    sys.stderr = open(logfile_path, "w")
+logger = file_logger.FileLogger(config["log_level"], config["log_to_file"])
 
 # Set bot token, get dispatcher and job queue
 updater = Updater(token=config["bot_token"])
@@ -151,30 +117,6 @@ class KeyboardEnum(Enum):
         return self.name.replace("_", " ")
 
 
-# Log an event and save it in a file with current date as name
-def log(severity, msg):
-    # Add file handler to logger if enabled
-    if config["log_to_file"]:
-        now = datetime.datetime.now().strftime(date_format)
-
-        # If current date not the same as initial one, create new FileHandler
-        if str(now) != str(date):
-            # Remove old handlers
-            for hdlr in logger.handlers[:]:
-                logger.removeHandler(hdlr)
-
-            new_hdlr = logging.FileHandler(logfile_path, encoding="utf-8")
-            new_hdlr.setLevel(config["log_level"])
-
-            # Format file handler
-            new_hdlr.setFormatter(formatter)
-
-            # Add file handler to logger
-            logger.addHandler(new_hdlr)
-
-    logger.log(severity, msg)
-
-
 # Issue Kraken API requests
 def kraken_api(method, data=None, private=False, retries=None):
     # Get arguments of this function
@@ -185,7 +127,7 @@ def kraken_api(method, data=None, private=False, retries=None):
     caller = inspect.currentframe().f_back.f_code.co_name
 
     # Log caller of this function and all arguments
-    log(logging.DEBUG, caller + " - args: " + str([(i, values[i]) for i in args]))
+    logger.debug(caller + " - args: " + str([(i, values[i]) for i in args]))
 
     try:
         if private:
@@ -194,7 +136,7 @@ def kraken_api(method, data=None, private=False, retries=None):
             return kraken.query_public(method, data)
 
     except Exception as ex:
-        log(logging.ERROR, str(ex))
+        logger.exception("kraken_api exception:")
 
         ex_name = type(ex).__name__
 
@@ -240,7 +182,7 @@ def restrict_access(func):
                 msg = "Access denied for user %s" % chat_id
                 bot.send_message(config["user_id"], text=msg)
 
-            log(logging.WARNING, msg)
+                logger.warning(msg)
             return
         else:
             return func(bot, update)
@@ -413,10 +355,10 @@ def trade_sell_all_confirm(bot, update):
                 msg_next = emo_wa + " Selling next asset..."
 
                 update.message.reply_text(msg_error + "\n" + msg_next)
-                log(logging.WARNING, msg_error)
+                logger.warning(msg_error)
                 continue
         else:
-            log(logging.WARNING, "No minimum order limit in config for coin " + balance_asset)
+            logger.warning("No minimum order limit in config for coin " + balance_asset)
             continue
 
         req_data = dict()
@@ -640,7 +582,7 @@ def trade_volume_asset(bot, update, chat_data):
         if float(chat_data["volume"]) < float(limits[chat_data["currency"]]):
             msg_error = emo_er + " Volume to low. Must be > " + limits[chat_data["currency"]]
             update.message.reply_text(msg_error)
-            log(logging.WARNING, msg_error)
+            logger.warning(msg_error)
 
             reply_msg = "Enter new volume"
             cancel_btn = build_menu([KeyboardButton(KeyboardEnum.CANCEL.clean())])
@@ -649,7 +591,7 @@ def trade_volume_asset(bot, update, chat_data):
 
             return WorkflowEnum.TRADE_VOLUME
     else:
-        log(logging.WARNING, "No minimum order limit in config for coin " + chat_data["currency"])
+        logger.warning("No minimum order limit in config for coin " + chat_data["currency"])
 
     trade_show_conf(update, chat_data)
 
@@ -665,7 +607,7 @@ def trade_volume(bot, update, chat_data):
         if float(chat_data["volume"]) < float(limits[chat_data["currency"]]):
             msg_error = emo_er + " Volume to low. Must be > " + limits[chat_data["currency"]]
             update.message.reply_text(msg_error)
-            log(logging.WARNING, msg_error)
+            logger.warning(msg_error)
 
             reply_msg = "Enter new volume"
             cancel_btn = build_menu([KeyboardButton(KeyboardEnum.CANCEL.clean())])
@@ -674,7 +616,7 @@ def trade_volume(bot, update, chat_data):
 
             return WorkflowEnum.TRADE_VOLUME
     else:
-        log(logging.WARNING, "No minimum order limit in config for coin " + chat_data["currency"])
+        logger.warning("No minimum order limit in config for coin " + chat_data["currency"])
 
     trade_show_conf(update, chat_data)
 
@@ -1739,7 +1681,7 @@ def order_state_check(bot, job):
     # If Kraken replied with an error, return without notification
     if res_data["error"]:
         error = btfy(res_data["error"][0])
-        log(logging.ERROR, error)
+        logger.error(error)
         if config["send_error"]:
             src = "Order state check:\n"
             bot.send_message(chat_id=config["user_id"], text=src + emo_er + " " + error)
@@ -1790,7 +1732,7 @@ def monitor_orders():
         # If Kraken replied with an error, show it
         if res_data["error"]:
             error = btfy(res_data["error"][0])
-            log(logging.ERROR, error)
+            logger.error(error)
             if config["send_error"]:
                 src = "Monitoring orders:\n"
                 updater.bot.send_message(chat_id=config["user_id"], text=src + emo_er + " " + error)
@@ -1856,7 +1798,7 @@ def init_cmd(bot, update):
 
         error = btfy(res_assets["error"][0])
         updater.bot.send_message(uid, error)
-        log(logging.ERROR, error)
+        logger.error(error)
         return
 
     # Save assets in global variable
@@ -1880,7 +1822,7 @@ def init_cmd(bot, update):
 
         error = btfy(res_pairs["error"][0])
         updater.bot.send_message(uid, error)
-        log(logging.ERROR, error)
+        logger.error(error)
         return
 
     msg = " Reading asset pairs... DONE"
@@ -2066,7 +2008,7 @@ def handle_api_error(response, update, additional_msg=""):
     if response["error"]:
         error = btfy(additional_msg + response["error"][0])
         update.message.reply_text(error)
-        log(logging.ERROR, error)
+        logger.error(error)
         return True
     return False
 
@@ -2074,7 +2016,7 @@ def handle_api_error(response, update, additional_msg=""):
 # Handle all telegram and telegram.ext related errors
 def handle_telegram_error(bot, update, error):
     error_str = "Update '%s' caused error '%s'" % (update, error)
-    log(logging.ERROR, error_str)
+    logger.error(error_str)
 
     if config["send_error"]:
         updater.bot.send_message(chat_id=config["user_id"], text=error_str)
@@ -2280,7 +2222,7 @@ dispatcher.add_handler(settings_handler)
 
 
 # Write content of configuration file to log
-log(logging.DEBUG, "Configuration: " + str(config))
+logger.debug("Configuration: " + str(config))
 
 # If webhook is enabled, don't use polling
 # https://github.com/python-telegram-bot/python-telegram-bot/wiki/Webhooks
