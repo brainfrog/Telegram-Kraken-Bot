@@ -5,10 +5,7 @@ import datetime
 
 
 class FileLogger:
-    def __init__(self, log_level=10, log_to_file=True):
-        self._log_level = log_level
-        self._log_to_file = log_to_file
-
+    def __init__(self):
         # Formatter string for logging
         self._formatter_str = "%(asctime)s - %(levelname)s - %(name)s - %(message)s"
         self._date_format = "%y%m%d"
@@ -16,12 +13,23 @@ class FileLogger:
         # Folder name for logfiles
         self._log_dir = "log"
 
+        # Current date for logging
+        self._date = datetime.datetime.now().strftime(self._date_format)
+
+        self._log_level = logging.DEBUG
+        self._log_to_file = False
+
         # Do not use the logger directly. Use function 'log(msg, severity)'
         logging.basicConfig(level=self._log_level, format=self._formatter_str)
         self._logger = logging.getLogger()
 
-        # Current date for logging
-        self._date = datetime.datetime.now().strftime(self._date_format)
+    def init(self, log_level, log_to_file):
+        self._log_level = log_level
+        self._log_to_file = log_to_file
+
+        # Do not use the logger directly. Use function 'log(msg, severity)'
+        logging.basicConfig(level=self._log_level, format=self._formatter_str)
+        self._logger = logging.getLogger()
 
         # Add a file handlers to the logger if enabled
         if self._log_to_file:
@@ -81,3 +89,6 @@ class FileLogger:
 
     def critical(self, msg, *args, **kwargs):
         self.log(logging.CRITICAL, msg, *args, **kwargs)
+
+
+logger = FileLogger()
