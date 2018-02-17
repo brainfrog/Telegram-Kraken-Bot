@@ -36,8 +36,6 @@ job_queue = updater.job_queue
 kraken = kraken_api.Kraken("kraken.key", config["retries"])
 
 # Cached objects
-# All successfully executed trades
-trades = list()
 # All open orders
 orders = list()
 # All assets with internal long name & external short name
@@ -126,7 +124,7 @@ def restrict_access(func):
 def balance_cmd(bot, update):
     update.message.reply_text(emo_wa + " Retrieving balance...")
 
-    msg = get_api_result(kraken.get_balance(), update)
+    msg = get_api_result(kraken.balance(), update)
     if not msg:
         return
 
@@ -961,54 +959,45 @@ def get_trade_str(trade):
     return trade_str
 
 
+def trades_to_msg(trades):
+    msg = ""
+    # Get number of first items in list (latest trades)
+    for items in range(config["history_items"]):
+        newest_trade = next(iter(trades), None)
+
+        one, two = assets_from_pair(newest_trade["pair"])
+
+        # It's a fiat currency
+        if two.startswith("Z"):
+            total_value = "{0:.2f}".format(float(newest_trade["price"]) * float(newest_trade["vol"]))
+        # It's a digital currency
+        else:
+            total_value = "{0:.8f}".format(float(newest_trade["price"]) * float(newest_trade["vol"]))
+
+        msg += get_trade_str(newest_trade) + " (Value: " + total_value + " " + assets[two]["altname"] + ")\n"
+
+        # Remove the first item in the trades list
+        trades.remove(newest_trade)
+
+    return msg
+
+
 # Shows executed trades with volume and price
 @restrict_access
 def history_cmd(bot, update):
     update.message.reply_text(emo_wa + " Retrieving finalized trades...")
 
-    # Send request to Kraken to get trades history
-    res_trades = kraken.query("TradesHistory", private=True)
-
-    # If Kraken replied with an error, show it
-    if handle_api_error(res_trades, update):
-        return
-
-    # Reset global trades list
-    global trades
-    trades = list()
-
-    # Add all trades to global list
-    for trade_id, trade_details in res_trades["result"]["trades"].items():
-        trades.append(trade_details)
+    trades = get_api_result(kraken.trades_history(), update)
 
     if trades:
-        # Sort global list with trades - on executed time
-        trades = sorted(trades, key=lambda k: k['time'], reverse=True)
-
         buttons = [
             KeyboardButton(KeyboardEnum.NEXT.clean()),
             KeyboardButton(KeyboardEnum.CANCEL.clean())
         ]
 
-        # Get number of first items in list (latest trades)
-        for items in range(config["history_items"]):
-            newest_trade = next(iter(trades), None)
-
-            one, two = assets_from_pair(newest_trade["pair"])
-
-            # It's a fiat currency
-            if two.startswith("Z"):
-                total_value = "{0:.2f}".format(float(newest_trade["price"]) * float(newest_trade["vol"]))
-            # It's a digital currency
-            else:
-                total_value = "{0:.8f}".format(float(newest_trade["price"]) * float(newest_trade["vol"]))
-
-            reply_mrk = ReplyKeyboardMarkup(build_menu(buttons, n_cols=2), resize_keyboard=True)
-            msg = get_trade_str(newest_trade) + " (Value: " + total_value + " " + assets[two]["altname"] + ")"
-            update.message.reply_text(bold(msg), reply_markup=reply_mrk, parse_mode=ParseMode.MARKDOWN)
-
-            # Remove the first item in the trades list
-            trades.remove(newest_trade)
+        msg = trades_to_msg(trades)
+        reply_mrk = ReplyKeyboardMarkup(build_menu(buttons, n_cols=2), resize_keyboard=True)
+        update.message.reply_text(bold(msg), reply_markup=reply_mrk, parse_mode=ParseMode.MARKDOWN)
 
         return WorkflowEnum.HISTORY_NEXT
     else:
@@ -1019,25 +1008,10 @@ def history_cmd(bot, update):
 
 # Save if BUY, SELL or ALL trade history and choose how many entries to list
 def history_next(bot, update):
+    trades = kraken.get_trades()
     if trades:
-        # Get number of first items in list (latest trades)
-        for items in range(config["history_items"]):
-            newest_trade = next(iter(trades), None)
-
-            one, two = assets_from_pair(newest_trade["pair"])
-
-            # It's a fiat currency
-            if two.startswith("Z"):
-                total_value = "{0:.2f}".format(float(newest_trade["price"]) * float(newest_trade["vol"]))
-            # It's a digital currency
-            else:
-                total_value = "{0:.8f}".format(float(newest_trade["price"]) * float(newest_trade["vol"]))
-
-            msg = get_trade_str(newest_trade) + " (Value: " + total_value + " " + assets[two]["altname"] + ")"
-            update.message.reply_text(bold(msg), parse_mode=ParseMode.MARKDOWN)
-
-            # Remove the first item in the trades list
-            trades.remove(newest_trade)
+        msg = trades_to_msg(trades)
+        update.message.reply_text(bold(msg), parse_mode=ParseMode.MARKDOWN)
 
         return WorkflowEnum.HISTORY_NEXT
     else:
@@ -1676,7 +1650,7 @@ def init_cmd(bot, update):
     m = updater.bot.send_message(uid, emo_wa + msg, disable_notification=True)
 
     # TODO: encapsulate assets
-    success, res_assets = kraken.read_assets()
+    success, res_assets = kraken.assets()
     if not success:
         msg = "Reading assets... FAILED\n" + cmds
         return handle_init_error(res_assets, msg, uid, m.message_id)
@@ -1692,7 +1666,7 @@ def init_cmd(bot, update):
     msg = " Reading asset pairs..."
     m = updater.bot.send_message(uid, emo_wa + msg, disable_notification=True)
 
-    success, res_pairs = kraken.get_assets_pairs()
+    success, res_pairs = kraken.assets_pairs()
     if not success:
         msg = "Reading asset pairs... FAILED\n" + cmds
         return handle_init_error(res_pairs, msg, uid, m.message_id)
@@ -1796,11 +1770,12 @@ def handle_api_error(response, update, additional_msg=""):
 
 def get_api_result(response, update, additional_msg=""):
     if response[0]:
-        error = btfy(additional_msg + response[1])
-        update.message.reply_text(error)
-        logger.error(error)
-        return None
-    return response[1]
+        return response[1]
+
+    error = btfy(additional_msg + response[1])
+    update.message.reply_text(error)
+    logger.error(error)
+    return None
 
 
 # Handle all telegram and telegram.ext related errors
