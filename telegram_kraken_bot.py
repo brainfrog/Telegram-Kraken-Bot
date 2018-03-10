@@ -46,6 +46,16 @@ pairs = dict()
 limits = dict()
 
 
+class TradeState(Enum):
+    CURRENCY = auto()
+    BUY_SELL = auto()
+    ORDER_TYPE = auto()
+    PRICE = auto()
+    STOP_PRICE = auto()
+    VOLUME = auto()
+    CONFIRM = auto()
+
+
 # Enum for workflow handler
 class WorkflowEnum(Enum):
     TRADE_BUY_SELL = auto()
@@ -1116,149 +1126,6 @@ def chart_currency(bot, update):
     return ConversationHandler.END
 
 
-# Choose currency to deposit or withdraw funds to / from
-@restrict_access
-def funding_cmd(bot, update):
-    reply_msg = "Choose currency"
-
-    cancel_btn = [
-        KeyboardButton(KeyboardEnum.CANCEL.clean())
-    ]
-
-    menu = build_menu(coin_buttons(), n_cols=3, footer_buttons=cancel_btn)
-    reply_mrk = ReplyKeyboardMarkup(menu, resize_keyboard=True)
-    update.message.reply_text(reply_msg, reply_markup=reply_mrk)
-
-    return WorkflowEnum.FUNDING_CURRENCY
-
-
-# Choose withdraw or deposit
-def funding_currency(bot, update, chat_data):
-    chat_data["currency"] = update.message.text.upper()
-
-    reply_msg = "What do you want to do?"
-
-    buttons = [
-        KeyboardButton(KeyboardEnum.DEPOSIT.clean()),
-        KeyboardButton(KeyboardEnum.WITHDRAW.clean())
-    ]
-
-    cancel_btn = [
-        KeyboardButton(KeyboardEnum.CANCEL.clean())
-    ]
-
-    menu = build_menu(buttons, n_cols=2, footer_buttons=cancel_btn)
-    reply_mrk = ReplyKeyboardMarkup(menu, resize_keyboard=True)
-    update.message.reply_text(reply_msg, reply_markup=reply_mrk)
-
-    return WorkflowEnum.FUNDING_CHOOSE
-
-
-# Get wallet addresses to deposit to
-def funding_deposit(bot, update, chat_data):
-    update.message.reply_text(emo_wa + " Retrieving wallets to deposit...")
-
-    req_data = dict()
-    req_data["asset"] = chat_data["currency"]
-
-    # Send request to Kraken to get trades history
-    res_dep_meth = kraken.query("DepositMethods", data=req_data, private=True)
-
-    # If Kraken replied with an error, show it
-    if handle_api_error(res_dep_meth, update):
-        return
-
-    req_data["method"] = res_dep_meth["result"][0]["method"]
-
-    # Send request to Kraken to get trades history
-    res_dep_addr = kraken.query("DepositAddresses", data=req_data, private=True)
-
-    # If Kraken replied with an error, show it
-    if handle_api_error(res_dep_addr, update):
-        return
-
-    # Wallet found
-    if res_dep_addr["result"]:
-        for wallet in res_dep_addr["result"]:
-            expire_info = datetime_from_timestamp(wallet["expiretm"]) if wallet["expiretm"] != "0" else "No"
-            msg = wallet["address"] + "\nExpire: " + expire_info
-            update.message.reply_text(bold(msg), parse_mode=ParseMode.MARKDOWN, reply_markup=keyboard_cmds())
-    # No wallet found
-    else:
-        update.message.reply_text("No wallet found", reply_markup=keyboard_cmds())
-
-    return ConversationHandler.END
-
-
-def funding_withdraw(bot, update):
-    update.message.reply_text("Enter target wallet name", reply_markup=ReplyKeyboardRemove())
-
-    return WorkflowEnum.WITHDRAW_WALLET
-
-
-def funding_withdraw_wallet(bot, update, chat_data):
-    chat_data["wallet"] = update.message.text
-
-    update.message.reply_text("Enter " + chat_data["currency"] + " volume to withdraw")
-
-    return WorkflowEnum.WITHDRAW_VOLUME
-
-
-def funding_withdraw_volume(bot, update, chat_data):
-    chat_data["volume"] = update.message.text.replace(",", ".")
-
-    volume = chat_data["volume"]
-    currency = chat_data["currency"]
-    wallet = chat_data["wallet"]
-    reply_msg = " Withdraw " + volume + " " + currency + " to wallet " + wallet + "?"
-
-    update.message.reply_text(emo_qu + reply_msg, reply_markup=keyboard_confirm())
-
-    return WorkflowEnum.WITHDRAW_CONFIRM
-
-
-# Withdraw funds from wallet
-def funding_withdraw_confirm(bot, update, chat_data):
-    if update.message.text.upper() == KeyboardEnum.NO.clean():
-        return cancel(bot, update, chat_data=chat_data)
-
-    update.message.reply_text(emo_wa + " Withdrawal initiated...")
-
-    req_data = dict()
-    req_data["asset"] = chat_data["currency"]
-    req_data["key"] = chat_data["wallet"]
-    req_data["amount"] = chat_data["volume"]
-
-    # Send request to Kraken to get withdrawal info to lookup fee
-    res_data = kraken.query("WithdrawInfo", data=req_data, private=True)
-
-    # If Kraken replied with an error, show it
-    if handle_api_error(res_data, update):
-        return
-
-    # Add up volume and fee and set the new value as 'amount'
-    volume_and_fee = float(req_data["amount"]) + float(res_data["result"]["fee"])
-    req_data["amount"] = str(volume_and_fee)
-
-    # Send request to Kraken to withdraw digital currency
-    res_data = kraken.query("Withdraw", data=req_data, private=True)
-
-    # If Kraken replied with an error, show it
-    if handle_api_error(res_data, update):
-        return
-
-    # If a REFID exists, the withdrawal was initiated
-    if res_data["result"]["refid"]:
-        msg = " Withdrawal executed\nREFID: " + res_data["result"]["refid"]
-        update.message.reply_text(emo_fi + msg)
-    else:
-        msg = " Undefined state: no error and no REFID"
-        update.message.reply_text(emo_er + msg)
-
-    clear_chat_data(chat_data)
-    return ConversationHandler.END
-
-
 # Download newest script, update the currently running one and restart.
 # If 'config.json' changed, update it also
 @restrict_access
@@ -1495,7 +1362,6 @@ def keyboard_cmds():
         KeyboardButton("/value"),
         KeyboardButton("/chart"),
         KeyboardButton("/history"),
-        KeyboardButton("/funding"),
         KeyboardButton("/bot")
     ]
 
@@ -1803,30 +1669,6 @@ dispatcher.add_handler(CommandHandler("balance", balance_cmd))
 dispatcher.add_handler(CommandHandler("reload", reload_cmd))
 dispatcher.add_handler(CommandHandler("state", state_cmd))
 dispatcher.add_handler(CommandHandler("start", start_cmd))
-
-
-# TODO: Use enums inside RegexHandlers
-# FUNDING conversation handler
-funding_handler = ConversationHandler(
-    entry_points=[CommandHandler('funding', funding_cmd)],
-    states={
-        WorkflowEnum.FUNDING_CURRENCY:
-            [RegexHandler(comp("^(" + regex_coin_or() + ")$"), funding_currency, pass_chat_data=True),
-             RegexHandler(comp("^(CANCEL)$"), cancel, pass_chat_data=True)],
-        WorkflowEnum.FUNDING_CHOOSE:
-            [RegexHandler(comp("^(DEPOSIT)$"), funding_deposit, pass_chat_data=True),
-             RegexHandler(comp("^(WITHDRAW)$"), funding_withdraw),
-             RegexHandler(comp("^(CANCEL)$"), cancel, pass_chat_data=True)],
-        WorkflowEnum.WITHDRAW_WALLET:
-            [MessageHandler(Filters.text, funding_withdraw_wallet, pass_chat_data=True)],
-        WorkflowEnum.WITHDRAW_VOLUME:
-            [MessageHandler(Filters.text, funding_withdraw_volume, pass_chat_data=True)],
-        WorkflowEnum.WITHDRAW_CONFIRM:
-            [RegexHandler(comp("^(YES|NO)$"), funding_withdraw_confirm, pass_chat_data=True)]
-    },
-    fallbacks=[CommandHandler('cancel', cancel, pass_chat_data=True)]
-)
-dispatcher.add_handler(funding_handler)
 
 
 # HISTORY conversation handler
