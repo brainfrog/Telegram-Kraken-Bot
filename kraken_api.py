@@ -9,7 +9,6 @@ from file_logger import logger
 
 class Kraken(krakenex.API):
     _assets = {}
-    _trades = []
 
     def __init__(self, keyfile="kraken.key", retries=0):
         super().__init__()
@@ -187,22 +186,3 @@ class Kraken(krakenex.API):
             for name in comp_inner_cont.find_all(class_="name"):
                 if "API" in name.get_text():
                     return comp_inner_cont.find(class_="component-status").get_text().strip()
-
-    def trades_history(self):
-        # Send request to Kraken to get trades history
-        res_trades = self.query("TradesHistory", private=True)
-
-        if res_trades["error"]:
-            return False, res_trades["error"][0]
-
-        for trade_id, trade_details in res_trades["result"]["trades"].items():
-            self._trades.append(trade_details)
-
-        if self._trades:
-            # Sort trades on executed time
-            self._trades = sorted(self._trades, key=lambda k: k['time'], reverse=True)
-
-        return True, self._trades
-
-    def get_trades(self):
-        return self._trades

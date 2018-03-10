@@ -72,12 +72,6 @@ class WorkflowEnum(Enum):
     VALUE_CURRENCY = auto()
     BOT_SUB_CMD = auto()
     CHART_CURRENCY = auto()
-    HISTORY_NEXT = auto()
-    FUNDING_CURRENCY = auto()
-    FUNDING_CHOOSE = auto()
-    WITHDRAW_WALLET = auto()
-    WITHDRAW_VOLUME = auto()
-    WITHDRAW_CONFIRM = auto()
     SETTINGS_CHANGE = auto()
     SETTINGS_SAVE = auto()
     SETTINGS_CONFIRM = auto()
@@ -98,9 +92,6 @@ class KeyboardEnum(Enum):
     UPDATE = auto()
     RESTART = auto()
     SHUTDOWN = auto()
-    NEXT = auto()
-    DEPOSIT = auto()
-    WITHDRAW = auto()
     SETTINGS = auto()
     API_STATE = auto()
     MARKET_PRICE = auto()
@@ -949,88 +940,6 @@ def start_cmd(bot, update):
     update.message.reply_text(msg, reply_markup=keyboard_cmds())
 
 
-# Returns a string representation of a trade. Looks like this:
-# sell 0.03752345 ETH-EUR @ limit 267.5 on 2017-08-22 22:18:22
-def get_trade_str(trade):
-    from_asset, to_asset = assets_from_pair(trade["pair"])
-
-    if from_asset and to_asset:
-        pair = assets[from_asset]["altname"] + "-" + assets[to_asset]["altname"]
-    else:
-        pair = trade["pair"]
-
-    # Build the string representation of the trade
-    trade_str = (trade["type"] + " " +
-                 trim_zeros(trade["vol"]) + " " +
-                 pair + " @ limit " +
-                 trim_zeros(trade["price"]) + " on " +
-                 datetime_from_timestamp(trade["time"]))
-
-    return trade_str
-
-
-def trades_to_msg(trades):
-    msg = ""
-    # Get number of first items in list (latest trades)
-    for items in range(config["history_items"]):
-        newest_trade = next(iter(trades), None)
-
-        one, two = assets_from_pair(newest_trade["pair"])
-
-        # It's a fiat currency
-        if two.startswith("Z"):
-            total_value = "{0:.2f}".format(float(newest_trade["price"]) * float(newest_trade["vol"]))
-        # It's a digital currency
-        else:
-            total_value = "{0:.8f}".format(float(newest_trade["price"]) * float(newest_trade["vol"]))
-
-        msg += get_trade_str(newest_trade) + " (Value: " + total_value + " " + assets[two]["altname"] + ")\n"
-
-        # Remove the first item in the trades list
-        trades.remove(newest_trade)
-
-    return msg
-
-
-# Shows executed trades with volume and price
-@restrict_access
-def history_cmd(bot, update):
-    update.message.reply_text(emo_wa + " Retrieving finalized trades...")
-
-    trades = get_api_result(kraken.trades_history(), update)
-
-    if trades:
-        buttons = [
-            KeyboardButton(KeyboardEnum.NEXT.clean()),
-            KeyboardButton(KeyboardEnum.CANCEL.clean())
-        ]
-
-        msg = trades_to_msg(trades)
-        reply_mrk = ReplyKeyboardMarkup(build_menu(buttons, n_cols=2), resize_keyboard=True)
-        update.message.reply_text(bold(msg), reply_markup=reply_mrk, parse_mode=ParseMode.MARKDOWN)
-
-        return WorkflowEnum.HISTORY_NEXT
-    else:
-        update.message.reply_text("No item in trade history", reply_markup=keyboard_cmds())
-
-        return ConversationHandler.END
-
-
-# Save if BUY, SELL or ALL trade history and choose how many entries to list
-def history_next(bot, update):
-    trades = kraken.get_trades()
-    if trades:
-        msg = trades_to_msg(trades)
-        update.message.reply_text(bold(msg), parse_mode=ParseMode.MARKDOWN)
-
-        return WorkflowEnum.HISTORY_NEXT
-    else:
-        msg = bold("Trade history is empty")
-        update.message.reply_text(emo_fi + " " + msg, reply_markup=keyboard_cmds(), parse_mode=ParseMode.MARKDOWN)
-
-        return ConversationHandler.END
-
-
 # Shows sub-commands to control the bot
 @restrict_access
 def bot_cmd(bot, update):
@@ -1361,7 +1270,6 @@ def keyboard_cmds():
         KeyboardButton("/price"),
         KeyboardButton("/value"),
         KeyboardButton("/chart"),
-        KeyboardButton("/history"),
         KeyboardButton("/bot")
     ]
 
@@ -1669,19 +1577,6 @@ dispatcher.add_handler(CommandHandler("balance", balance_cmd))
 dispatcher.add_handler(CommandHandler("reload", reload_cmd))
 dispatcher.add_handler(CommandHandler("state", state_cmd))
 dispatcher.add_handler(CommandHandler("start", start_cmd))
-
-
-# HISTORY conversation handler
-history_handler = ConversationHandler(
-    entry_points=[CommandHandler('history', history_cmd)],
-    states={
-        WorkflowEnum.HISTORY_NEXT:
-            [RegexHandler(comp("^(NEXT)$"), history_next),
-             RegexHandler(comp("^(CANCEL)$"), cancel)]
-    },
-    fallbacks=[CommandHandler('cancel', cancel)]
-)
-dispatcher.add_handler(history_handler)
 
 
 # CHART conversation handler
