@@ -86,8 +86,6 @@ class KeyboardEnum(Enum):
     CANCEL = auto()
     CLOSE_ORDER = auto()
     CLOSE_ALL = auto()
-    UPDATE_CHECK = auto()
-    UPDATE = auto()
     RESTART = auto()
     SHUTDOWN = auto()
     SETTINGS = auto()
@@ -872,8 +870,6 @@ def bot_cmd(bot, update):
     reply_msg = "What do you want to do?"
 
     buttons = [
-        KeyboardButton(KeyboardEnum.UPDATE_CHECK.clean()),
-        KeyboardButton(KeyboardEnum.UPDATE.clean()),
         KeyboardButton(KeyboardEnum.RESTART.clean()),
         KeyboardButton(KeyboardEnum.SHUTDOWN.clean()),
         KeyboardButton(KeyboardEnum.SETTINGS.clean()),
@@ -889,18 +885,8 @@ def bot_cmd(bot, update):
 
 # Execute chosen sub-cmd of 'bot' cmd
 def bot_sub_cmd(bot, update):
-    # Update check
-    if update.message.text.upper() == KeyboardEnum.UPDATE_CHECK.clean():
-        status_code, msg = get_update_state()
-        update.message.reply_text(msg)
-        return
-
-    # Update
-    elif update.message.text.upper() == KeyboardEnum.UPDATE.clean():
-        return update_cmd(bot, update)
-
     # Restart
-    elif update.message.text.upper() == KeyboardEnum.RESTART.clean():
+    if update.message.text.upper() == KeyboardEnum.RESTART.clean():
         restart_cmd(bot, update)
 
     # Shutdown
@@ -914,62 +900,6 @@ def bot_sub_cmd(bot, update):
     # Cancel
     elif update.message.text.upper() == KeyboardEnum.CANCEL.clean():
         return cancel(bot, update)
-
-
-# Download newest script, update the currently running one and restart.
-# If 'config.json' changed, update it also
-@restrict_access
-def update_cmd(bot, update):
-    # Get newest version of this script from GitHub
-    headers = {"If-None-Match": config["update_hash"]}
-    github_script = requests.get(config["update_url"], headers=headers)
-
-    # Status code 304 = Not Modified
-    if github_script.status_code == 304:
-        msg = "You are running the latest version"
-        update.message.reply_text(msg, reply_markup=keyboard_cmds())
-    # Status code 200 = OK
-    elif github_script.status_code == 200:
-        # Get github 'config.json' file
-        last_slash_index = config["update_url"].rfind("/")
-        github_config_path = config["update_url"][:last_slash_index + 1] + "config.json"
-        github_config_file = requests.get(github_config_path)
-        github_config = json.loads(github_config_file.text)
-
-        # Compare current config keys with
-        # config keys from github-config
-        if set(config) != set(github_config):
-            # Go through all keys in github-config and
-            # if they are not present in current config, add them
-            for key, value in github_config.items():
-                if key not in config:
-                    config[key] = value
-
-        # Save current ETag (hash) of bot script in github-config
-        e_tag = github_script.headers.get("ETag")
-        config["update_hash"] = e_tag
-
-        # Save changed github-config as new config
-        with open("config.json", "w") as cfg:
-            json.dump(config, cfg, indent=4)
-
-        # Get the name of the currently running script
-        path_split = os.path.split(str(sys.argv[0]))
-        filename = path_split[len(path_split)-1]
-
-        # Save the content of the remote file
-        with open(filename, "w") as file:
-            file.write(github_script.text)
-
-        # Restart the bot
-        restart_cmd(bot, update)
-
-    # Every other status code
-    else:
-        msg = emo_er + " Update not executed. Unexpected status code: " + github_script.status_code
-        update.message.reply_text(msg, reply_markup=keyboard_cmds())
-
-    return ConversationHandler.END
 
 
 # This needs to be run on a new thread because calling 'updater.stop()' inside a
@@ -1100,25 +1030,6 @@ def cancel(bot, update, chat_data=None):
     return ConversationHandler.END
 
 
-# Check if GitHub hosts a different script then the currently running one
-def get_update_state():
-    # Get newest version of this script from GitHub
-    headers = {"If-None-Match": config["update_hash"]}
-    github_file = requests.get(config["update_url"], headers=headers)
-
-    # Status code 304 = Not Modified (remote file has same hash, is the same version)
-    if github_file.status_code == 304:
-        msg = emo_to + " Bot is up to date"
-    # Status code 200 = OK (remote file has different hash, is not the same version)
-    elif github_file.status_code == 200:
-        msg = emo_no + " New version available. Get it with /update"
-    # Every other status code
-    else:
-        msg = emo_er + " Update check not possible. Unexpected status code: " + github_file.status_code
-
-    return github_file.status_code, msg
-
-
 # Return chat ID for an update object
 def get_chat_id(update=None):
     if update:
@@ -1148,7 +1059,6 @@ def keyboard_cmds():
         KeyboardButton("/trade"),
         KeyboardButton("/orders"),
         KeyboardButton("/balance"),
-        KeyboardButton("/price"),
         KeyboardButton("/value"),
         KeyboardButton("/bot")
     ]
@@ -1208,25 +1118,6 @@ def order_state_check(bot, job):
         bot.send_message(chat_id=config["user_id"], text=bold(emo_no + msg), parse_mode=ParseMode.MARKDOWN)
         # Stop this job
         job.schedule_removal()
-
-
-# Start periodical job to check if new bot version is available
-def monitor_updates():
-    if config["update_check"]:
-        # Save time in seconds from config
-        update_time = config["update_time"]
-
-        # Check if current bot version is the latest
-        def version_check(bot, job):
-            status_code, msg = get_update_state()
-
-            # Status code 200 means that the remote file is not the same
-            if status_code == 200:
-                msg = emo_no + " New version available. Get it with /update"
-                bot.send_message(chat_id=config["user_id"], text=msg)
-
-        # Add Job to JobQueue to run periodically
-        job_queue.run_repeating(version_check, update_time, first=0)
 
 
 # Monitor status changes of previously created open orders
@@ -1449,7 +1340,6 @@ init_cmd(None, None)
 dispatcher.add_error_handler(handle_telegram_error)
 
 # Add command handlers to dispatcher
-dispatcher.add_handler(CommandHandler("update", update_cmd))
 dispatcher.add_handler(CommandHandler("restart", restart_cmd))
 dispatcher.add_handler(CommandHandler("shutdown", shutdown_cmd))
 dispatcher.add_handler(CommandHandler("initialize", init_cmd))
@@ -1551,7 +1441,7 @@ bot_handler = ConversationHandler(
     entry_points=[CommandHandler('bot', bot_cmd)],
     states={
         WorkflowEnum.BOT_SUB_CMD:
-            [RegexHandler(comp("^(UPDATE CHECK|UPDATE|RESTART|SHUTDOWN)$"), bot_sub_cmd),
+            [RegexHandler(comp("^(RESTART|SHUTDOWN)$"), bot_sub_cmd),
              RegexHandler(comp("^(API STATE)$"), state_cmd),
              RegexHandler(comp("^(SETTINGS)$"), settings_cmd),
              RegexHandler(comp("^(CANCEL)$"), cancel)],
@@ -1593,9 +1483,6 @@ else:
     # Start polling to handle all user input
     # Dismiss all in the meantime send commands
     updater.start_polling(clean=True)
-
-# Check for new bot version periodically
-monitor_updates()
 
 # Monitor status changes of open orders
 monitor_orders()
