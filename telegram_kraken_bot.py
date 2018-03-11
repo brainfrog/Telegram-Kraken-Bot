@@ -71,7 +71,6 @@ class WorkflowEnum(Enum):
     PRICE_CURRENCY = auto()
     VALUE_CURRENCY = auto()
     BOT_SUB_CMD = auto()
-    CHART_CURRENCY = auto()
     SETTINGS_CHANGE = auto()
     SETTINGS_SAVE = auto()
     SETTINGS_CONFIRM = auto()
@@ -990,51 +989,6 @@ def bot_sub_cmd(bot, update):
         return cancel(bot, update)
 
 
-# Show links to Kraken currency charts
-@restrict_access
-def chart_cmd(bot, update):
-    # Send only one message with all configured charts
-    if config["single_chart"]:
-        msg = str()
-
-        for coin, url in config["coin_charts"].items():
-            msg += coin + ": " + url + "\n"
-
-        update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN, reply_markup=keyboard_cmds())
-
-        return ConversationHandler.END
-
-    # Choose currency and display chart for it
-    else:
-        reply_msg = "Choose currency"
-
-        buttons = list()
-        for coin, url in config["coin_charts"].items():
-            buttons.append(KeyboardButton(coin))
-
-        cancel_btn = [
-            KeyboardButton(KeyboardEnum.CANCEL.clean())
-        ]
-
-        menu = build_menu(buttons, n_cols=3, footer_buttons=cancel_btn)
-        reply_mrk = ReplyKeyboardMarkup(menu, resize_keyboard=True)
-        update.message.reply_text(reply_msg, reply_markup=reply_mrk)
-
-        return WorkflowEnum.CHART_CURRENCY
-
-
-# Get chart URL for every coin in config
-def chart_currency(bot, update):
-    currency = update.message.text
-
-    for coin, url in config["coin_charts"].items():
-        if currency.upper() == coin.upper():
-            update.message.reply_text(url, reply_markup=keyboard_cmds())
-            break
-
-    return ConversationHandler.END
-
-
 # Download newest script, update the currently running one and restart.
 # If 'config.json' changed, update it also
 @restrict_access
@@ -1269,7 +1223,6 @@ def keyboard_cmds():
         KeyboardButton("/balance"),
         KeyboardButton("/price"),
         KeyboardButton("/value"),
-        KeyboardButton("/chart"),
         KeyboardButton("/bot")
     ]
 
@@ -1577,19 +1530,6 @@ dispatcher.add_handler(CommandHandler("balance", balance_cmd))
 dispatcher.add_handler(CommandHandler("reload", reload_cmd))
 dispatcher.add_handler(CommandHandler("state", state_cmd))
 dispatcher.add_handler(CommandHandler("start", start_cmd))
-
-
-# CHART conversation handler
-chart_handler = ConversationHandler(
-    entry_points=[CommandHandler('chart', chart_cmd)],
-    states={
-        WorkflowEnum.CHART_CURRENCY:
-            [RegexHandler(comp("^(" + regex_coin_or() + ")$"), chart_currency),
-             RegexHandler(comp("^(CANCEL)$"), cancel)]
-    },
-    fallbacks=[CommandHandler('cancel', cancel)]
-)
-dispatcher.add_handler(chart_handler)
 
 
 # ORDERS conversation handler
