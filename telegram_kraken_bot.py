@@ -68,7 +68,6 @@ class WorkflowEnum(Enum):
     TRADE_CONFIRM = auto()
     ORDERS_CLOSE = auto()
     ORDERS_CLOSE_ORDER = auto()
-    PRICE_CURRENCY = auto()
     VALUE_CURRENCY = auto()
     BOT_SUB_CMD = auto()
     SETTINGS_CHANGE = auto()
@@ -736,78 +735,6 @@ def orders_close_order(bot, update):
 
     msg = emo_fi + " " + bold("Order closed:\n" + req_data["txid"])
     update.message.reply_text(msg, reply_markup=keyboard_cmds(), parse_mode=ParseMode.MARKDOWN)
-    return ConversationHandler.END
-
-
-# Show the last trade price for a currency
-@restrict_access
-def price_cmd(bot, update):
-    # If single-price option is active, get prices for all coins
-    if config["single_price"]:
-        update.message.reply_text(emo_wa + " Retrieving prices...")
-
-        req_data = dict()
-        req_data["pair"] = str()
-
-        # Add all configured asset pairs to the request
-        for asset, trade_pair in pairs.items():
-            req_data["pair"] += trade_pair + ","
-
-        # Get rid of last comma
-        req_data["pair"] = req_data["pair"][:-1]
-
-        # Send request to Kraken to get current trading price for currency-pair
-        res_data = kraken.query("Ticker", data=req_data, private=False)
-
-        # If Kraken replied with an error, show it
-        if handle_api_error(res_data, update):
-            return
-
-        msg = str()
-
-        for pair, data in res_data["result"].items():
-            last_trade_price = trim_zeros(data["c"][0])
-            coin = list(pairs.keys())[list(pairs.values()).index(pair)]
-            msg += coin + ": " + last_trade_price + " " + config["used_pairs"][coin] + "\n"
-
-        update.message.reply_text(bold(msg), parse_mode=ParseMode.MARKDOWN)
-
-        return ConversationHandler.END
-
-    # Let user choose for which coin to get the price
-    else:
-        reply_msg = "Choose currency"
-
-        cancel_btn = [
-            KeyboardButton(KeyboardEnum.CANCEL.clean())
-        ]
-
-        menu = build_menu(coin_buttons(), n_cols=3, footer_buttons=cancel_btn)
-        reply_mrk = ReplyKeyboardMarkup(menu, resize_keyboard=True)
-        update.message.reply_text(reply_msg, reply_markup=reply_mrk)
-
-        return WorkflowEnum.PRICE_CURRENCY
-
-
-# Choose for which currency to show the last trade price
-def price_currency(bot, update):
-    update.message.reply_text(emo_wa + " Retrieving price...")
-
-    currency = update.message.text.upper()
-    req_data = {"pair": pairs[currency]}
-
-    # Send request to Kraken to get current trading price for currency-pair
-    res_data = kraken.query("Ticker", data=req_data, private=False)
-
-    # If Kraken replied with an error, show it
-    if handle_api_error(res_data, update):
-        return
-
-    last_trade_price = trim_zeros(res_data["result"][req_data["pair"]]["c"][0])
-
-    msg = bold(currency + ": " + last_trade_price + " " + config["used_pairs"][currency])
-    update.message.reply_text(msg, reply_markup=keyboard_cmds(), parse_mode=ParseMode.MARKDOWN)
-
     return ConversationHandler.END
 
 
@@ -1582,19 +1509,6 @@ trade_handler = ConversationHandler(
     fallbacks=[CommandHandler('cancel', cancel, pass_chat_data=True)]
 )
 dispatcher.add_handler(trade_handler)
-
-
-# PRICE conversation handler
-price_handler = ConversationHandler(
-    entry_points=[CommandHandler('price', price_cmd)],
-    states={
-        WorkflowEnum.PRICE_CURRENCY:
-            [RegexHandler(comp("^(" + regex_coin_or() + ")$"), price_currency),
-             RegexHandler(comp("^(CANCEL)$"), cancel)]
-    },
-    fallbacks=[CommandHandler('cancel', cancel)]
-)
-dispatcher.add_handler(price_handler)
 
 
 # VALUE conversation handler
