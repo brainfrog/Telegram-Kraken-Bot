@@ -68,7 +68,6 @@ class WorkflowEnum(Enum):
     TRADE_CONFIRM = auto()
     ORDERS_CLOSE = auto()
     ORDERS_CLOSE_ORDER = auto()
-    VALUE_CURRENCY = auto()
     BOT_SUB_CMD = auto()
     SETTINGS_CHANGE = auto()
     SETTINGS_SAVE = auto()
@@ -736,104 +735,6 @@ def orders_close_order(bot, update):
     return ConversationHandler.END
 
 
-# Show the current real money value for a certain asset or for all assets combined
-@restrict_access
-def value_cmd(bot, update):
-    reply_msg = "Choose currency"
-
-    footer_btns = [
-        KeyboardButton(KeyboardEnum.ALL.clean()),
-        KeyboardButton(KeyboardEnum.CANCEL.clean())
-    ]
-
-    menu = build_menu(coin_buttons(), n_cols=3, footer_buttons=footer_btns)
-    reply_mrk = ReplyKeyboardMarkup(menu, resize_keyboard=True)
-    update.message.reply_text(reply_msg, reply_markup=reply_mrk)
-
-    return WorkflowEnum.VALUE_CURRENCY
-
-
-# Choose for which currency you want to know the current value
-def value_currency(bot, update):
-    update.message.reply_text(emo_wa + " Retrieving current value...")
-
-    # ALL COINS (balance of all coins)
-    if update.message.text.upper() == KeyboardEnum.ALL.clean():
-        req_asset = dict()
-        req_asset["asset"] = config["base_currency"]
-
-        # Send request to Kraken tp obtain the combined balance of all currencies
-        res_trade_balance = kraken.query("TradeBalance", data=req_asset, private=True)
-
-        # If Kraken replied with an error, show it
-        if handle_api_error(res_trade_balance, update):
-            return
-
-        for asset, data in assets.items():
-            if data["altname"] == config["base_currency"]:
-                if asset.startswith("Z"):
-                    # It's a fiat currency, show only 2 digits after decimal place
-                    total_fiat_value = "{0:.2f}".format(float(res_trade_balance["result"]["eb"]))
-                else:
-                    # It's not a fiat currency, show 8 digits after decimal place
-                    total_fiat_value = "{0:.8f}".format(float(res_trade_balance["result"]["eb"]))
-
-        # Generate message to user
-        msg = "Overall: " + total_fiat_value + " " + config["base_currency"]
-        update.message.reply_text(bold(msg), reply_markup=keyboard_cmds(), parse_mode=ParseMode.MARKDOWN)
-
-    # ONE COINS (balance of specific coin)
-    else:
-        # Send request to Kraken to get balance of all currencies
-        res_balance = kraken.query("Balance", private=True)
-
-        # If Kraken replied with an error, show it
-        if handle_api_error(res_balance, update):
-            return
-
-        req_price = dict()
-        # Get pair string for chosen currency
-        req_price["pair"] = pairs[update.message.text.upper()]
-
-        # Send request to Kraken to get current trading price for currency-pair
-        res_price = kraken.query("Ticker", data=req_price, private=False)
-
-        # If Kraken replied with an error, show it
-        if handle_api_error(res_price, update):
-            return
-
-        # Get last trade price
-        pair = list(res_price["result"].keys())[0]
-        last_price = res_price["result"][pair]["c"][0]
-
-        value = float(0)
-
-        for asset, data in assets.items():
-            if data["altname"] == update.message.text.upper():
-                buy_from_cur_long = pair.replace(asset, "")
-                buy_from_cur = assets[buy_from_cur_long]["altname"]
-                # Calculate value by multiplying balance with last trade price
-                value = float(res_balance["result"][asset]) * float(last_price)
-                break
-
-        # If fiat currency, show 2 digits after decimal place
-        if buy_from_cur_long.startswith("Z"):
-            value = "{0:.2f}".format(value)
-            last_trade_price = "{0:.2f}".format(float(last_price))
-        # ... else show 8 digits after decimal place
-        else:
-            value = "{0:.8f}".format(value)
-            last_trade_price = "{0:.8f}".format(float(last_price))
-
-        msg = update.message.text.upper() + ": " + value + " " + buy_from_cur
-
-        # Add last trade price to msg
-        msg += "\n(Ticker: " + last_trade_price + " " + buy_from_cur + ")"
-        update.message.reply_text(bold(msg), reply_markup=keyboard_cmds(), parse_mode=ParseMode.MARKDOWN)
-
-    return ConversationHandler.END
-
-
 # FIXME: Doesn't end the current conversation
 # Reloads keyboard with available commands
 @restrict_access
@@ -1059,11 +960,10 @@ def keyboard_cmds():
         KeyboardButton("/trade"),
         KeyboardButton("/orders"),
         KeyboardButton("/balance"),
-        KeyboardButton("/value"),
         KeyboardButton("/bot")
     ]
 
-    return ReplyKeyboardMarkup(build_menu(command_buttons, n_cols=3), resize_keyboard=True)
+    return ReplyKeyboardMarkup(build_menu(command_buttons, n_cols=2), resize_keyboard=True)
 
 
 # Generic custom keyboard that shows YES and NO
@@ -1399,19 +1299,6 @@ trade_handler = ConversationHandler(
     fallbacks=[CommandHandler('cancel', cancel, pass_chat_data=True)]
 )
 dispatcher.add_handler(trade_handler)
-
-
-# VALUE conversation handler
-value_handler = ConversationHandler(
-    entry_points=[CommandHandler('value', value_cmd)],
-    states={
-        WorkflowEnum.VALUE_CURRENCY:
-            [RegexHandler(comp("^(" + regex_coin_or() + "|ALL)$"), value_currency),
-             RegexHandler(comp("^(CANCEL)$"), cancel)]
-    },
-    fallbacks=[CommandHandler('cancel', cancel)]
-)
-dispatcher.add_handler(value_handler)
 
 
 # Will return the SETTINGS_CHANGE state for a conversation handler
